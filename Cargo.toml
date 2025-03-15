@@ -1,0 +1,11 @@
+[package]
+name = "chachavr"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+num_cpus = "1.16.0"
+rand = "0.9.0"
+rayon = "1.10.0"
+secrecy = "0.10.3"
+zeroize = "1.8.1"

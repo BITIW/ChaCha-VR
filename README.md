@@ -88,6 +88,9 @@ File: "video.mp4" (4500000 bytes)
 > This is an experimental research project to analyze how round counts and internal modifications affect security and performance.  
 > **Not recommended for use in high-security environments without a full, independent audit.**
 
+### AI Assistance
+
+Some parts of this project (such as initial drafts, formatting, and testing ideas) were assisted by AI tools (like ChatGPT). However, all cryptographic logic, algorithmic design, and testing methodologies were developed(although, rather, written), reviewed, and finalized by the author as part of independent research.
 ---
 
 ## TODO (Ideas for Future)

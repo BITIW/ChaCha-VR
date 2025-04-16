@@ -15,10 +15,10 @@ use rand::Rng;
 
 #[derive(Debug)]
 pub struct ChaChaVR {
-    rounds: u32,         // Число раундов (чётное, >=2)
-    state: [u32; 16],    // Внутреннее состояние (16 слов по 32 бита)
-    keystream: [u8; 64], // 64-байтовый блок keystream
-    pos: usize,          // Текущая позиция в keystream (0..63)
+    rounds: u32,         // Количество раундов (четное, >=2)
+    state: [u32; 16],    // Внутреннее состояние (16 x 32-битных слов)
+    keystream: [u8; 64], // 64-байтовый блок ключевого потока
+    pos: usize,          // Текущая позиция в кейстрииме (0..63)
 }
 
 impl Drop for ChaChaVR {
@@ -31,19 +31,16 @@ impl Drop for ChaChaVR {
 }
 
 impl ChaChaVR {
-    /// Дополнительное перемешивание состояния (pre_mix_state).
-    /// Выполняет extra раунды для усиления лавинного эффекта.
-    fn pre_mix_state(state: &mut [u32; 16], mix_rounds: u32) {
-        // mix_rounds должно быть чётным; каждая итерация включает столбцовые и диагональные раунды.
-        for _ in 0..(mix_rounds / 2) {
+    fn do_rounds(state: &mut [u32; 16], rounds: u32){
+        for _ in 0..(rounds / 2) {
             unsafe {
                 let ptr = state.as_mut_ptr();
-                // Столбцовые раунды
+                // Столбцы
                 Self::quarter_round(&mut *ptr.add(0), &mut *ptr.add(4),  &mut *ptr.add(8),  &mut *ptr.add(12));
                 Self::quarter_round(&mut *ptr.add(1), &mut *ptr.add(5),  &mut *ptr.add(9),  &mut *ptr.add(13));
                 Self::quarter_round(&mut *ptr.add(2), &mut *ptr.add(6),  &mut *ptr.add(10), &mut *ptr.add(14));
                 Self::quarter_round(&mut *ptr.add(3), &mut *ptr.add(7),  &mut *ptr.add(11), &mut *ptr.add(15));
-                // Диагональные раунды
+                // Диагонали
                 Self::quarter_round(&mut *ptr.add(0), &mut *ptr.add(5),  &mut *ptr.add(10), &mut *ptr.add(15));
                 Self::quarter_round(&mut *ptr.add(1), &mut *ptr.add(6),  &mut *ptr.add(11), &mut *ptr.add(12));
                 Self::quarter_round(&mut *ptr.add(2), &mut *ptr.add(7),  &mut *ptr.add(8),  &mut *ptr.add(13));
@@ -51,11 +48,17 @@ impl ChaChaVR {
             }
         }
     }
+    /// Дополнительное смешивание состояний (pre_mix_state)
+    /// Выполняет дополнительные раунды для усиления эффекта лавинной реакции.
+    fn pre_mix_state(state: &mut [u32; 16], mix_rounds: u32) {
+        // mix_rounds должно быть четным. Каждая итерация выполняет раунды по столбцам и раунды по диагонали.
+        Self::do_rounds(state,mix_rounds)
+    }
     
-    /// Создание нового экземпляра ChaChaVR.
-    /// - `key`: 16 или 32 байта.
-    /// - `nonce`: 8 или 12 байт.
-    /// - `rounds`: любое чётное число (>=2).
+    /// Создает новый экземпляр ChaChaVR.
+    /// - 'key': 16 или 32 байта.
+    /// - 'nonce': 8 или 12 байт.
+    /// - 'rounds': любое четное число (>=2).
     pub fn new(key: &[u8], nonce: &[u8], rounds: u32) -> Result<Self, &'static str> {
         if rounds < 2 || rounds % 2 != 0 {
             return Err("Rounds must be an even number and >=2");
@@ -69,23 +72,23 @@ impl ChaChaVR {
         
         let mut state = [0u32; 16];
         if key.len() == 16 {
-            // Используем pad "expand 16-byte k"
-            let pad = b"expand 16-byte k"; // ровно 16 байт
+            // Используйте панель "expand 16-byte k"
+            let pad = b"expand 16-byte k"; // Точно 16 байт
             state[0] = u32::from_le_bytes([pad[0], pad[1], pad[2], pad[3]]);
             state[1] = u32::from_le_bytes([pad[4], pad[5], pad[6], pad[7]]);
             state[2] = u32::from_le_bytes([pad[8], pad[9], pad[10], pad[11]]);
             state[3] = u32::from_le_bytes([pad[12], pad[13], pad[14], pad[15]]);
-            // Загружаем ключ в state[4..7]
+            // Ключ в состояние 0..7
             for i in 0..4 {
                 state[4 + i] = u32::from_le_bytes(key[4 * i..4 * i + 4].try_into().unwrap());
             }
-            // Дублируем ключ для state[8..11]
+            // Дупликат из 8..11
             for i in 0..4 {
                 state[8 + i] = state[4 + i];
             }
         } else {
-            // Используем pad "expand 32-byte k"
-            let pad = b"expand 32-byte k"; // ровно 16 байт
+            // Используйте панель "expand 32-byte k"
+            let pad = b"expand 32-byte k"; // Точно 16 байт
             state[0] = u32::from_le_bytes([pad[0], pad[1], pad[2], pad[3]]);
             state[1] = u32::from_le_bytes([pad[4], pad[5], pad[6], pad[7]]);
             state[2] = u32::from_le_bytes([pad[8], pad[9], pad[10], pad[11]]);
@@ -95,28 +98,28 @@ impl ChaChaVR {
             }
         }
         
-        // Инициализация nonce и счётчика
+        // Инициализировать одноразовый номер и счетчик.
         if nonce.len() == 8 {
             state[12] = 0;
             state[13] = 0;
             state[14] = u32::from_le_bytes(nonce[0..4].try_into().unwrap());
             state[15] = u32::from_le_bytes(nonce[4..8].try_into().unwrap());
         } else {
-            // Для 96-битного nonce счётчик занимает state[12], а nonce – state[13..15]
+            //Для 96-битного nonce счетчик занимает состояние [12], а nonce заполняет состояние [13..15].
             state[12] = 0;
             state[13] = u32::from_le_bytes(nonce[0..4].try_into().unwrap());
             state[14] = u32::from_le_bytes(nonce[4..8].try_into().unwrap());
             state[15] = u32::from_le_bytes(nonce[8..12].try_into().unwrap());
         }
         
-        // Применяем дополнительное перемешивание состояния (pre_mix_state) для усиления лавинного эффекта.
+        // Дополнительно перемешивают смесь для усиления диффузии.
         Self::pre_mix_state(&mut state, 4);
         
         Ok(Self {
             rounds,
             state,
             keystream: [0u8; 64],
-            pos: 64, // генерация нового блока происходит при первом вызове process()
+            pos: 64, // запускать генерацию блока потока ключей при первом использовании
         })
     }
     
@@ -139,24 +142,10 @@ impl ChaChaVR {
         *b = b.rotate_left(7);
     }
     
-    /// Генерация нового 64-байтового блока keystream.
+    /// Генерирует новый 64-байтовый блок ключевого потока.
     fn process_block(&mut self) {
         let mut working_state = self.state;
-        for _ in 0..(self.rounds / 2) {
-            unsafe {
-                let ptr = working_state.as_mut_ptr();
-                // Столбцовые раунды
-                Self::quarter_round(&mut *ptr.add(0), &mut *ptr.add(4),  &mut *ptr.add(8),  &mut *ptr.add(12));
-                Self::quarter_round(&mut *ptr.add(1), &mut *ptr.add(5),  &mut *ptr.add(9),  &mut *ptr.add(13));
-                Self::quarter_round(&mut *ptr.add(2), &mut *ptr.add(6),  &mut *ptr.add(10), &mut *ptr.add(14));
-                Self::quarter_round(&mut *ptr.add(3), &mut *ptr.add(7),  &mut *ptr.add(11), &mut *ptr.add(15));
-                // Диагональные раунды
-                Self::quarter_round(&mut *ptr.add(0), &mut *ptr.add(5),  &mut *ptr.add(10), &mut *ptr.add(15));
-                Self::quarter_round(&mut *ptr.add(1), &mut *ptr.add(6),  &mut *ptr.add(11), &mut *ptr.add(12));
-                Self::quarter_round(&mut *ptr.add(2), &mut *ptr.add(7),  &mut *ptr.add(8),  &mut *ptr.add(13));
-                Self::quarter_round(&mut *ptr.add(3), &mut *ptr.add(4),  &mut *ptr.add(9),  &mut *ptr.add(14));
-            }
-        }
+        Self::do_rounds(&mut working_state, self.rounds);
         for i in 0..16 {
             working_state[i] = working_state[i].wrapping_add(self.state[i]);
         }
@@ -165,14 +154,14 @@ impl ChaChaVR {
         }
     }
     
-    /// Шифрование/расшифрование входного буфера (XOR с keystream).
+    /// Зашифровывает/расшифровывает входной буфер (XOR с потоком ключей).
     pub fn process(&mut self, input: &[u8]) -> Vec<u8> {
         let mut output = Vec::with_capacity(input.len());
         let mut remaining = input;
         while !remaining.is_empty() {
             if self.pos >= 64 {
                 self.process_block();
-                // Инкремент счетчика блока в state[12] (с переносом в state[13])
+                // Увеличить счетчик блоков в состоянии [12]; обработать переполнение в состоянии [13]
                 self.state[12] = self.state[12].wrapping_add(1);
                 if self.state[12] == 0 {
                     self.state[13] = self.state[13].wrapping_add(1);
@@ -190,26 +179,26 @@ impl ChaChaVR {
         output
     }
     
-    /// Простая обфускация данных (байтовый сдвиг).
+    /// Простая обфускация путем сдвига байтов.
     pub fn byte_shift(data: &mut [u8], shift: u8) {
         for byte in data.iter_mut() {
             *byte = byte.wrapping_add(shift);
         }
     }
     
-    /// Обфускация внутреннего keystream.
+    /// Обфусцирует внутренний ключевой поток.
     pub fn obfuscate_keystream(&mut self, shift: u8) {
         Self::byte_shift(&mut self.keystream, shift);
     }
 }
 
 // ====================
-// Реальные тесты (Real-World Tests) с использованием многопоточности через Rayon
+// Реальные тесты с многопоточностью с использованием Rayon
 // ====================
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-/// Вычисляет расстояние Хэмминга между двумя срезами байтов.
+/// Вычисляет расстояние Хэмминга между двумя байтовыми слайсами.
 fn hamming_distance(a: &[u8], b: &[u8]) -> u32 {
     a.iter()
      .zip(b.iter())
@@ -217,16 +206,16 @@ fn hamming_distance(a: &[u8], b: &[u8]) -> u32 {
      .sum()
 }
 
-/// Тест для одного файла: выполняет KAT, Avalanche и Speed тесты.
+/// Запускает тесты KAT, Avalanche и Speed для одного файла.
 fn test_file(path: &Path, rounds: u32) {
-    // Считываем файл целиком (для очень больших файлов рекомендуется потоковое чтение)
-    let mut file = File::open(path).expect("Не удалось открыть файл");
+    // Прочитайте весь файл (для очень больших файлов рассмотрите возможность потоковой передачи)
+    let mut file = File::open(path).expect("Cannot open file");
     let mut data = Vec::new();
-    file.read_to_end(&mut data).expect("Не удалось прочитать файл");
+    file.read_to_end(&mut data).expect("Cannot read file");
     
-    println!("Файл: {:?} ({} байт)", path.file_name().unwrap(), data.len());
+    println!("File: {:?} ({} bytes)", path.file_name().unwrap(), data.len());
     
-    // Генерируем случайный ключ и nonce для данного файла
+    // Сгенерируйте случайный ключ и одноразовый номер для теста этого файла.
     let mut rng = rand::rng();
     let mut key_bytes = [0u8; 32];
     rng.fill(&mut key_bytes);
@@ -235,12 +224,12 @@ fn test_file(path: &Path, rounds: u32) {
     let mut nonce = [0u8; 12];
     rng.fill(&mut nonce);
     
-    // --- KAT тест ---
+    // --- KAT ---
     let mut cipher1 = ChaChaVR::new(key.expose_secret(), &nonce, rounds)
-        .expect("Ошибка инициализации шифра");
+        .expect("Failed to init cipher");
     let ct1 = cipher1.process(&data);
     let mut cipher2 = ChaChaVR::new(key.expose_secret(), &nonce, rounds)
-        .expect("Ошибка инициализации шифра");
+        .expect("Failed to init cipher");
     let ct2 = cipher2.process(&data);
     if ct1 == ct2 {
         println!("  KAT PASS");
@@ -249,53 +238,53 @@ fn test_file(path: &Path, rounds: u32) {
     }
     // Тест расшифровки
     let mut decipher = ChaChaVR::new(key.expose_secret(), &nonce, rounds)
-        .expect("Ошибка инициализации шифра");
+        .expect("Failed to init cipher");
     let recovered = decipher.process(&ct1);
     if recovered == data {
-        println!("  Расшифровка PASS");
+        println!("  Decryption PASS");
     } else {
-        println!("  Расшифровка FAIL");
+        println!("  Decryption FAIL");
     }
     
-    // --- Avalanche тест ---
-    // Берем первые 64 байта файла (если файл меньше 64 байт, то используем весь)
+    // --- Тест Avalanche ---
+    // Используйте первые 64 байта файла (или весь файл, если < 64 байта)
     let block = if data.len() >= 64 { &data[..64] } else { &data[..] };
     let mut cipher_orig = ChaChaVR::new(key.expose_secret(), &nonce, rounds)
-        .expect("Ошибка инициализации шифра");
+        .expect("Failed to init cipher");
     let ct_orig = cipher_orig.process(block);
     
     let key_bits = key_bytes.len() * 8;
     let mut total_distance = 0u32;
     for bit in 0..key_bits {
-        let mut modified_key = key_bytes;
+        let mut modified_key = key_bytes.clone();
         let byte_pos = bit / 8;
         let bit_pos = bit % 8;
         modified_key[byte_pos] ^= 1 << bit_pos;
         let mut cipher_mod = ChaChaVR::new(&modified_key, &nonce, rounds)
-            .expect("Ошибка инициализации шифра");
+            .expect("Failed to init cipher");
         let ct_mod = cipher_mod.process(block);
         total_distance += hamming_distance(&ct_orig, &ct_mod);
     }
     let avg_distance = total_distance as f64 / (key_bits as f64);
-    println!("  Avalanche: {:.2} бит на флип бита ключа", avg_distance);
+    println!("  Avalanche: {:.2} bits per key bit flip", avg_distance);
     
-    // --- Speed тест ---
+    // --- Тест скорости ---
     let start = Instant::now();
     let mut cipher_speed = ChaChaVR::new(key.expose_secret(), &nonce, rounds)
-        .expect("Ошибка инициализации шифра");
+        .expect("Failed to init cipher");
     let _ = cipher_speed.process(&data);
     let elapsed = start.elapsed();
     let mb = data.len() as f64 / (1024.0 * 1024.0);
     let throughput = mb / elapsed.as_secs_f64();
-    println!("  Скорость: {:.3} MB/s (время: {:.3} с)", throughput, elapsed.as_secs_f64());
+    println!("  Speed: {:.3} MB/s (elapsed: {:.3} s)", throughput, elapsed.as_secs_f64());
     println!();
 }
 
-/// Многопоточная обработка файлов из указанной директории с использованием Rayon.
-/// Каждый файл обрабатывается независимо.
+/// Запускает реальные тесты для всех файлов в заданном каталоге с использованием Rayon для параллельной обработки.
+/// Каждый файл обрабатывается полностью в своем собственном потоке.
 fn real_world_tests(dir_path: &str, rounds: u32) {
     let paths: Vec<_> = fs::read_dir(dir_path)
-        .expect("Не удалось прочитать директорию")
+        .expect("Cannot read directory")
         .filter_map(|res| {
             res.ok().and_then(|entry| {
                 let path = entry.path();
@@ -305,26 +294,23 @@ fn real_world_tests(dir_path: &str, rounds: u32) {
         .collect();
     
     if paths.is_empty() {
-        println!("В директории {} не найдено файлов", dir_path);
+        println!("No files found in {}", dir_path);
         return;
     }
     
-    println!("Найдено {} файлов в {}", paths.len(), dir_path);
+    println!("Found {} files in {}", paths.len(), dir_path);
     
-    // Обработка файлов параллельно с использованием Rayon.
+    // Параллельная обработка файлов с помощью Rayon.
     paths.par_iter().for_each(|path| {
         test_file(path, rounds);
     });
 }
 
 fn main() {
-    // Запускаем тесты в области видимости, чтобы секретные данные быстро уничтожались.
-    {
-        // Задайте свою директорию с тестовыми файлами (например, "test_data")
-        let rounds = 42;
-        let dir_path = "test_data"; // измените на нужную директорию
-        
-        println!("=== Реальные тесты ===");
-        real_world_tests(dir_path, rounds);
-    }
+    // Установите тестовый каталог и раунды здесь.
+    let rounds: u8 = 2;
+    let dir_path: &str = r"E:\test"; // измените на свой тестовый каталог
+    
+    println!("=== Real-World Tests ===");
+    real_world_tests(dir_path, rounds.into());
 }

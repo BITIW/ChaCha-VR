@@ -31,11 +31,8 @@ impl Drop for ChaChaVR {
 }
 
 impl ChaChaVR {
-    /// Additional state mixing (pre_mix_state)
-    /// Executes extra rounds to improve the avalanche effect.
-    fn pre_mix_state(state: &mut [u32; 16], mix_rounds: u32) {
-        // mix_rounds must be even. Each iteration runs column rounds and diagonal rounds.
-        for _ in 0..(mix_rounds / 2) {
+    fn do_rounds(state: &mut [u32; 16], rounds: u32){
+        for _ in 0..(rounds / 2) {
             unsafe {
                 let ptr = state.as_mut_ptr();
                 // Column rounds
@@ -50,6 +47,12 @@ impl ChaChaVR {
                 Self::quarter_round(&mut *ptr.add(3), &mut *ptr.add(4),  &mut *ptr.add(9),  &mut *ptr.add(14));
             }
         }
+    }
+    /// Additional state mixing (pre_mix_state)
+    /// Executes extra rounds to improve the avalanche effect.
+    fn pre_mix_state(state: &mut [u32; 16], mix_rounds: u32) {
+        // mix_rounds must be even. Each iteration runs column rounds and diagonal rounds.
+        Self::do_rounds(state,mix_rounds)
     }
     
     /// Creates a new ChaChaVR instance.
@@ -142,21 +145,7 @@ impl ChaChaVR {
     /// Generates a new 64-byte keystream block.
     fn process_block(&mut self) {
         let mut working_state = self.state;
-        for _ in 0..(self.rounds / 2) {
-            unsafe {
-                let ptr = working_state.as_mut_ptr();
-                // Column rounds
-                Self::quarter_round(&mut *ptr.add(0), &mut *ptr.add(4),  &mut *ptr.add(8),  &mut *ptr.add(12));
-                Self::quarter_round(&mut *ptr.add(1), &mut *ptr.add(5),  &mut *ptr.add(9),  &mut *ptr.add(13));
-                Self::quarter_round(&mut *ptr.add(2), &mut *ptr.add(6),  &mut *ptr.add(10), &mut *ptr.add(14));
-                Self::quarter_round(&mut *ptr.add(3), &mut *ptr.add(7),  &mut *ptr.add(11), &mut *ptr.add(15));
-                // Diagonal rounds
-                Self::quarter_round(&mut *ptr.add(0), &mut *ptr.add(5),  &mut *ptr.add(10), &mut *ptr.add(15));
-                Self::quarter_round(&mut *ptr.add(1), &mut *ptr.add(6),  &mut *ptr.add(11), &mut *ptr.add(12));
-                Self::quarter_round(&mut *ptr.add(2), &mut *ptr.add(7),  &mut *ptr.add(8),  &mut *ptr.add(13));
-                Self::quarter_round(&mut *ptr.add(3), &mut *ptr.add(4),  &mut *ptr.add(9),  &mut *ptr.add(14));
-            }
-        }
+        Self::do_rounds(&mut working_state, self.rounds);
         for i in 0..16 {
             working_state[i] = working_state[i].wrapping_add(self.state[i]);
         }
@@ -267,7 +256,7 @@ fn test_file(path: &Path, rounds: u32) {
     let key_bits = key_bytes.len() * 8;
     let mut total_distance = 0u32;
     for bit in 0..key_bits {
-        let mut modified_key = key_bytes;
+        let mut modified_key = key_bytes.clone();
         let byte_pos = bit / 8;
         let bit_pos = bit % 8;
         modified_key[byte_pos] ^= 1 << bit_pos;
@@ -318,13 +307,10 @@ fn real_world_tests(dir_path: &str, rounds: u32) {
 }
 
 fn main() {
-    // Run tests in a scope so that secret data is dropped immediately after.
-    {
-        // Set your test directory and rounds here.
-        let rounds = 42;
-        let dir_path = "test_data"; // change this to your test directory
-        
-        println!("=== Real-World Tests ===");
-        real_world_tests(dir_path, rounds);
-    }
+    // Set your test directory and rounds here.
+    let rounds: u8 = 2;
+    let dir_path: &str = r"E:\test"; // change this to your test directory
+    
+    println!("=== Real-World Tests ===");
+    real_world_tests(dir_path, rounds.into());
 }
